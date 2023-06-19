@@ -1,47 +1,28 @@
 package server
 
 import (
-	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
 )
-
-func NewHTTPServer(addr string) *http.Server {
-	httpsrv := newHTTPServer()
-
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			httpsrv.handleConsume(w, r)
-		}
-
-		if r.Method == http.MethodPost {
-			httpsrv.handleProduce(w, r)
-		}
-	})
-
-	return &http.Server{
-		Addr: addr,
-	}
-}
 
 type httpServer struct {
 	Log *Log
 }
 
-func newHTTPServer() *httpServer {
+func NewHTTPServer() *httpServer {
 	return &httpServer{
 		Log: NewLog(),
 	}
 }
 
 type ProduceRequest struct {
-	Record Record `json:"record"`
+	Record Record `json:"record" binding:"required"`
 }
 
 type ProduceResponse struct {
-	Offset uint64 `json:"offset"`
-}
-
-type ConsumeRequest struct {
 	Offset uint64 `json:"offset"`
 }
 
@@ -49,51 +30,40 @@ type ConsumeResponse struct {
 	Record Record `json:"record"`
 }
 
-func (s *httpServer) handleProduce(w http.ResponseWriter, r *http.Request) {
+func (s *httpServer) HandleProduce(c *gin.Context) {
 	var req ProduceRequest
-	err := json.NewDecoder(r.Body).Decode(&req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	offset, err := s.Log.Append(req.Record)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	res := ProduceResponse{Offset: offset}
-	err = json.NewEncoder(w).Encode(res)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	c.JSON(http.StatusOK, gin.H{"offset": offset})
 }
 
-func (s *httpServer) handleConsume(w http.ResponseWriter, r *http.Request) {
-	var req ConsumeRequest
-	err := json.NewDecoder(r.Body).Decode(&req)
+func (s *httpServer) HandleConsume(c *gin.Context) {
+	offset, err := strconv.Atoi(c.Query("offset"))
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Errorf("invalid offset")})
 		return
 	}
 
-	rec, err := s.Log.Read(req.Offset)
+	rec, err := s.Log.Read(uint64(offset))
 	if err == ErrorOffsetNotFound {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	err = json.NewEncoder(w).Encode(ConsumeResponse{Record: rec})
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	c.JSON(http.StatusOK, gin.H{"record": rec})
 }

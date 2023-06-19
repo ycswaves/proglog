@@ -11,7 +11,7 @@ type Log struct {
 }
 
 type Record struct {
-	Value  []byte `json:"value"`
+	Value  []byte `json:"value" binding:"required"`
 	Offset uint64 `json:"offset"`
 }
 
